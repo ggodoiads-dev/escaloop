@@ -20,21 +20,19 @@ interface ColaboradorInput {
 
 export async function criarColaborador(input: ColaboradorInput) {
   try {
-    // Verifica sessao do gestor
     const supabase = await createClient()
     const { data: { user }, error: userErr } = await supabase.auth.getUser()
     if (userErr) return { error: 'Erro de sessão: ' + userErr.message }
     if (!user) return { error: 'Não autorizado' }
 
-    const { data: gestor, error: gestorErr } = await supabase
-      .from('colaboradores').select('perfil').eq('user_id', user.id).single()
-    if (gestorErr) return { error: 'Erro ao verificar gestor: ' + gestorErr.message }
-    if (!gestor || gestor.perfil !== 'gestor') return { error: 'Sem permissão de gestor' }
-
-    // Admin client (service role — bypass RLS)
     const admin = createAdminClient()
 
-    // Insere colaborador
+    // Verifica se é gestor
+    const { data: gestor } = await admin
+      .from('colaboradores').select('perfil').eq('user_id', user.id).single()
+    if (!gestor || gestor.perfil !== 'gestor') return { error: 'Sem permissão de gestor' }
+
+    // Insere colaborador (user_id ainda NULL — será preenchido abaixo)
     const { data: colabData, error: insertError } = await admin
       .from('colaboradores')
       .insert({
@@ -55,19 +53,36 @@ export async function criarColaborador(input: ColaboradorInput) {
     if (insertError) return { error: 'Erro ao salvar: ' + insertError.message }
 
     // Cria conta de acesso no Auth
-    const { error: authError } = await admin.auth.admin.createUser({
+    let authUserId: string | null = null
+    const { data: authData, error: authError } = await admin.auth.admin.createUser({
       email: input.email,
       password: input.senha,
       email_confirm: true,
       user_metadata: { colaborador_id: colabData.id },
     })
-    if (authError && !authError.message.includes('already been registered')) {
-      console.warn('Auth warning:', authError.message)
+
+    if (authError) {
+      if (authError.message.toLowerCase().includes('already') || authError.message.toLowerCase().includes('registered')) {
+        // Usuário já existe no Auth — busca o ID existente
+        const { data: { users } } = await admin.auth.admin.listUsers({ perPage: 1000 })
+        const existing = users.find(u => u.email?.toLowerCase() === input.email.toLowerCase())
+        if (existing) authUserId = existing.id
+      } else {
+        console.warn('Auth warning:', authError.message)
+      }
+    } else if (authData?.user) {
+      authUserId = authData.user.id
     }
 
-    // Invalida o cache da pagina de colaboradores para mostrar dados frescos
-    revalidatePath('/colaboradores')
+    // Linka user_id explicitamente (não depende só do trigger)
+    if (authUserId) {
+      await admin
+        .from('colaboradores')
+        .update({ user_id: authUserId })
+        .eq('id', colabData.id)
+    }
 
+    revalidatePath('/colaboradores')
     return { success: true, id: colabData.id, perfil: colabData.perfil }
   } catch (e: any) {
     return { error: 'Erro inesperado: ' + (e?.message ?? 'desconhecido') }
