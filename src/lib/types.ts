@@ -1,5 +1,5 @@
 export type Perfil = 'gestor' | 'lider' | 'colaborador' | 'rh'
-export type Turno = 'A' | 'B' | 'C'
+export type Turno = 'A' | 'B' | 'C' | 'ADM'
 export type StatusLancamento = 'presente' | 'falta_injustificada' | 'falta_atestado' | 'folga' | 'atraso' | 'troca_turno' | 'pendente'
 export type StatusAtestado = 'pendente' | 'validado' | 'recusado'
 
@@ -14,8 +14,8 @@ export interface Colaborador {
   ativo: boolean
   data_admissao: string
   data_desligamento?: string
-  folga1_inicial: string
-  folga2_inicial: string
+  folga1_inicial: string | null
+  folga2_inicial: string | null
   user_id?: string
 }
 
