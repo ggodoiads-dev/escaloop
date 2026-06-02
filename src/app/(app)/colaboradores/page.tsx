@@ -1,7 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Search } from 'lucide-react'
+import { Plus } from 'lucide-react'
+
+// Sempre busca dados frescos do banco, sem cache
+export const dynamic = 'force-dynamic'
 
 export default async function ColaboradoresPage() {
   const supabase = await createClient()
@@ -24,7 +27,7 @@ export default async function ColaboradoresPage() {
   const ativos = colaboradores?.filter(c => c.ativo) ?? []
   const inativos = colaboradores?.filter(c => !c.ativo) ?? []
 
-  const turnoLabel: Record<string, string> = { A: '23h–07h', B: '07h–15h', C: '15h–23h' }
+  const turnoLabel: Record<string, string> = { A: '23h–07h', B: '07h–15h', C: '15h–23h', ADM: 'Administrativo' }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -67,8 +70,8 @@ export default async function ColaboradoresPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3 hidden md:table-cell">
-                  <span className="text-sm text-gray-700">Turno {c.turno}</span>
-                  <span className="block text-xs text-gray-400">{turnoLabel[c.turno]}</span>
+                  <span className="text-sm text-gray-700">{c.turno === 'ADM' ? 'ADM' : `Turno ${c.turno}`}</span>
+                  <span className="block text-xs text-gray-400">{turnoLabel[c.turno] ?? ''}</span>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700 hidden md:table-cell">{c.setor}</td>
                 <td className="px-4 py-3 hidden sm:table-cell">
@@ -97,7 +100,7 @@ export default async function ColaboradoresPage() {
                         <p className="font-medium text-gray-500 text-sm">{c.nome}</p>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-400 hidden md:table-cell">Turno {c.turno}</td>
+                    <td className="px-4 py-3 text-sm text-gray-400 hidden md:table-cell">{c.turno === 'ADM' ? 'ADM' : `Turno ${c.turno}`}</td>
                     <td className="px-4 py-3 text-sm text-gray-400 hidden md:table-cell">{c.setor}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <span className="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full capitalize">{c.perfil}</span>
