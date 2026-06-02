@@ -9,6 +9,7 @@ import { Save, AlertCircle } from 'lucide-react'
 
 const STATUS_OPTIONS: { value: StatusLancamento; label: string; cor: string }[] = [
   { value: 'presente', label: 'Presente', cor: 'bg-green-100 text-green-700 border-green-300' },
+  { value: 'folga', label: 'Folga', cor: 'bg-blue-100 text-blue-700 border-blue-300' },
   { value: 'falta_injustificada', label: 'Falta Injust.', cor: 'bg-red-100 text-red-700 border-red-300' },
   { value: 'falta_atestado', label: 'Falta c/ Atestado', cor: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
   { value: 'atraso', label: 'Atraso', cor: 'bg-orange-100 text-orange-700 border-orange-300' },

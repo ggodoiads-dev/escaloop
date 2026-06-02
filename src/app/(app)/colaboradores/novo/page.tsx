@@ -67,7 +67,8 @@ export default function NovoColaboradorPage() {
       if (result.error) throw new Error(result.error)
 
       toast.success(`${form.nome} cadastrado com sucesso!`)
-      router.push('/colaboradores')
+      // Hard navigation para garantir dados frescos na listagem
+      window.location.href = '/colaboradores'
     } catch (e: any) {
       toast.error('Erro ao cadastrar: ' + e.message)
     }

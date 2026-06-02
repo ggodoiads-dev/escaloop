@@ -7,26 +7,32 @@ import { ptBR } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Colaborador, Lancamento } from '@/lib/types'
 
-const STATUS_LABEL: Record<string, { label: string; bg: string; text: string }> = {
-  presente:           { label: 'T', bg: 'bg-green-100', text: 'text-green-700' },
-  folga:              { label: 'F', bg: 'bg-gray-100', text: 'text-gray-500' },
-  folga_programada:   { label: 'F', bg: 'bg-gray-100', text: 'text-gray-500' },
-  falta_injustificada:{ label: '!', bg: 'bg-red-100', text: 'text-red-600' },
-  falta_atestado:     { label: 'A', bg: 'bg-yellow-100', text: 'text-yellow-700' },
-  pendente:           { label: 'P', bg: 'bg-orange-100', text: 'text-orange-600' },
-  atraso:             { label: 'AT', bg: 'bg-orange-50', text: 'text-orange-500' },
-  troca_turno:        { label: 'TR', bg: 'bg-purple-100', text: 'text-purple-600' },
-  trabalho:           { label: 'T', bg: 'bg-green-50', text: 'text-green-600' },
+// Confirmado via lançamento manual
+const STATUS_LANC: Record<string, { label: string; bg: string; text: string }> = {
+  presente:            { label: '✓', bg: 'bg-green-500', text: 'text-white' },
+  folga:               { label: 'F', bg: 'bg-blue-100', text: 'text-blue-600' },
+  falta_injustificada: { label: '!', bg: 'bg-red-200', text: 'text-red-700' },
+  falta_atestado:      { label: 'A', bg: 'bg-yellow-200', text: 'text-yellow-800' },
+  pendente:            { label: 'P', bg: 'bg-orange-100', text: 'text-orange-600' },
+  atraso:              { label: 'AT', bg: 'bg-orange-300', text: 'text-orange-900' },
+  troca_turno:         { label: 'TR', bg: 'bg-purple-100', text: 'text-purple-600' },
+}
+
+// Calculado automaticamente (sem lançamento)
+const STATUS_CALC: Record<string, { label: string; bg: string; text: string }> = {
+  trabalho:       { label: '·', bg: 'bg-gray-50', text: 'text-gray-400' },
+  folga_calc:     { label: 'F', bg: 'bg-gray-100', text: 'text-gray-400' },
 }
 
 export default function EscalaPage() {
   const supabase = createClient()
   const [mes, setMes] = useState(new Date())
-  const [turnoFiltro, setTurnoFiltro] = useState<'A' | 'B' | 'C'>('A')
+  const [turnoFiltro, setTurnoFiltro] = useState<string>('A')
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [meuPerfil, setMeuPerfil] = useState('')
   const [meuTurno, setMeuTurno] = useState('')
+  const [iniciou, setIniciou] = useState(false)
 
   const ano = mes.getFullYear()
   const mesNum = mes.getMonth() + 1
@@ -44,10 +50,23 @@ export default function EscalaPage() {
         .eq('user_id', user.id)
         .single()
 
-      setMeuPerfil(eu?.perfil ?? '')
-      setMeuTurno(eu?.turno ?? '')
+      const perfil = eu?.perfil ?? ''
+      const turno = eu?.turno ?? 'A'
+      setMeuPerfil(perfil)
+      setMeuTurno(turno)
 
-      const turno = eu?.perfil === 'lider' ? eu.turno : turnoFiltro
+      // Define filtro inicial pelo turno do usuário (apenas na primeira carga)
+      if (!iniciou) {
+        setIniciou(true)
+        if (perfil !== 'lider') setTurnoFiltro(turno && turno !== 'ADM' ? turno : 'A')
+      }
+    }
+    load()
+  }, [])
+
+  useEffect(() => {
+    async function loadColabs() {
+      const turno = meuPerfil === 'lider' ? meuTurno : turnoFiltro
 
       const { data: colabs } = await supabase
         .from('colaboradores')
@@ -70,18 +89,26 @@ export default function EscalaPage() {
 
       setLancamentos(lancs ?? [])
     }
-    load()
-  }, [mes, turnoFiltro])
+    if (meuPerfil || turnoFiltro) loadColabs()
+  }, [mes, turnoFiltro, meuPerfil, meuTurno])
 
   function getStatus(colab: Colaborador, dia: string) {
+    // Lançamento manual tem prioridade
     const lanc = lancamentos.find(l => l.colaborador_id === colab.id && l.data === dia)
-    if (lanc) return STATUS_LABEL[lanc.status] ?? { label: '?', bg: 'bg-gray-100', text: 'text-gray-500' }
+    if (lanc) return STATUS_LANC[lanc.status] ?? { label: '?', bg: 'bg-gray-200', text: 'text-gray-600' }
 
+    // ADM não tem ciclo 6x2
+    if (!colab.folga1_inicial || !colab.folga2_inicial) {
+      if (dia > hoje) return { label: '', bg: '', text: '' }
+      return STATUS_CALC['trabalho']
+    }
+
+    // Folga calculada pelo ciclo 6x2
     const folgas = calcularFolgas(colab.folga1_inicial, colab.folga2_inicial)
-    if (folgas.includes(dia)) return STATUS_LABEL['folga_programada']
+    if (folgas.includes(dia)) return STATUS_CALC['folga_calc']
 
     if (dia > hoje) return { label: '', bg: '', text: '' }
-    return STATUS_LABEL['trabalho']
+    return STATUS_CALC['trabalho']
   }
 
   const porSetor = colaboradores.reduce((acc, c) => {
@@ -103,11 +130,8 @@ export default function EscalaPage() {
           {meuPerfil !== 'lider' && (
             <div className="flex rounded-lg overflow-hidden border border-gray-200">
               {(['A', 'B', 'C'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setTurnoFiltro(t)}
-                  className={`px-4 py-1.5 text-sm font-medium transition ${turnoFiltro === t ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                >
+                <button key={t} onClick={() => setTurnoFiltro(t)}
+                  className={`px-4 py-1.5 text-sm font-medium transition ${turnoFiltro === t ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                   Turno {t}
                 </button>
               ))}
@@ -130,13 +154,15 @@ export default function EscalaPage() {
       {/* Legenda */}
       <div className="flex flex-wrap gap-3 mb-4 text-xs">
         {[
-          { label: 'T — Trabalho', bg: 'bg-green-100', text: 'text-green-700' },
-          { label: 'F — Folga', bg: 'bg-gray-100', text: 'text-gray-500' },
-          { label: '! — Falta', bg: 'bg-red-100', text: 'text-red-600' },
-          { label: 'A — Atestado', bg: 'bg-yellow-100', text: 'text-yellow-700' },
-          { label: 'AT — Atraso', bg: 'bg-orange-50', text: 'text-orange-500' },
+          { label: '✓ Presente confirmado', bg: 'bg-green-500', text: 'text-white' },
+          { label: 'F Folga confirmada', bg: 'bg-blue-100', text: 'text-blue-600' },
+          { label: 'F Folga programada', bg: 'bg-gray-100', text: 'text-gray-400' },
+          { label: '! Falta', bg: 'bg-red-200', text: 'text-red-700' },
+          { label: 'A Atestado', bg: 'bg-yellow-200', text: 'text-yellow-800' },
+          { label: 'AT Atraso', bg: 'bg-orange-300', text: 'text-orange-900' },
+          { label: '· Esperado trabalhar', bg: 'bg-gray-50', text: 'text-gray-400' },
         ].map(l => (
-          <span key={l.label} className={`${l.bg} ${l.text} px-2 py-0.5 rounded font-medium`}>{l.label}</span>
+          <span key={l.label} className={`${l.bg} ${l.text} px-2 py-0.5 rounded font-medium border border-gray-100`}>{l.label}</span>
         ))}
       </div>
 

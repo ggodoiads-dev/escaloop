@@ -1,7 +1,8 @@
 import { addDays, format, parseISO, isSameDay } from 'date-fns'
 
 // Calcula todas as datas de folga no ciclo 6x2 a partir das duas primeiras
-export function calcularFolgas(folga1: string, folga2: string, mesesAFrente = 12): string[] {
+export function calcularFolgas(folga1: string | null | undefined, folga2: string | null | undefined, mesesAFrente = 12): string[] {
+  if (!folga1 || !folga2) return [] // turno ADM ou sem folgas definidas
   const f1 = parseISO(folga1)
   const f2 = parseISO(folga2)
   const folgas: string[] = []
@@ -20,12 +21,14 @@ export function calcularFolgas(folga1: string, folga2: string, mesesAFrente = 12
   return folgas
 }
 
-export function ehFolga(data: string, folga1: string, folga2: string): boolean {
+export function ehFolga(data: string, folga1: string | null | undefined, folga2: string | null | undefined): boolean {
+  if (!folga1 || !folga2) return false
   const folgas = calcularFolgas(folga1, folga2)
   return folgas.includes(data)
 }
 
-export function ehSegundoDiaFolga(data: string, folga1: string, folga2: string): boolean {
+export function ehSegundoDiaFolga(data: string, folga1: string | null | undefined, folga2: string | null | undefined): boolean {
+  if (!folga1) return false
   const f1 = parseISO(folga1)
   let dataAtual = f1
   const limite = addDays(new Date(), 365)
