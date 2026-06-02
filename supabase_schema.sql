@@ -8,14 +8,14 @@ CREATE TABLE IF NOT EXISTS colaboradores (
   nome TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   contato TEXT,
-  turno TEXT NOT NULL CHECK (turno IN ('A', 'B', 'C')),
+  turno TEXT NOT NULL CHECK (turno IN ('A', 'B', 'C', 'ADM')),
   setor TEXT NOT NULL,
   perfil TEXT NOT NULL DEFAULT 'colaborador' CHECK (perfil IN ('gestor', 'lider', 'colaborador', 'rh')),
   ativo BOOLEAN NOT NULL DEFAULT true,
   data_admissao DATE NOT NULL DEFAULT CURRENT_DATE,
   data_desligamento DATE,
-  folga1_inicial DATE NOT NULL,
-  folga2_inicial DATE NOT NULL,
+  folga1_inicial DATE,
+  folga2_inicial DATE,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

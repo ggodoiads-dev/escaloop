@@ -2,14 +2,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { calcularFolgas, getDiasDoMes } from '@/lib/escala'
-import { format, addMonths } from 'date-fns'
+import { calcularFolgas } from '@/lib/escala'
+import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toast } from 'sonner'
 import { ChevronRight, ChevronLeft, Check } from 'lucide-react'
 
-const SETORES = ['Líderes', 'Empilhadeiristas', 'Conferentes', 'Amarradores', 'Reforma de paletes', 'Seleção chapatex', '5S']
-const TURNOS = ['A', 'B', 'C']
+const SETORES = ['Líderes', 'Empilhadeiristas', 'Conferentes', 'Amarradores', 'Reforma de paletes', 'Seleção chapatex', '5S', 'Administrativo']
+const TURNOS = ['A', 'B', 'C', 'ADM']
 const PERFIS = ['colaborador', 'lider', 'rh', 'gestor']
 
 interface Form {
@@ -35,6 +35,8 @@ export default function NovoColaboradorPage() {
   })
   const [salvando, setSalvando] = useState(false)
 
+  const isAdm = form.turno === 'ADM'
+
   function set(field: keyof Form, value: string) {
     setForm(prev => ({ ...prev, [field]: value }))
   }
@@ -42,21 +44,14 @@ export default function NovoColaboradorPage() {
   function podeAvancar() {
     if (passo === 1) return !!form.perfil
     if (passo === 2) return !!(form.nome && form.turno && form.setor)
-    if (passo === 3) return !!(form.folga1 && form.folga2)
-    if (passo === 4) return !!(form.email && form.senha && form.senha === form.senha2)
+    if (passo === 3) return isAdm || !!(form.folga1 && form.folga2)
+    if (passo === 4) return !!(form.email && form.senha && form.senha.length >= 6 && form.senha === form.senha2)
     return true
   }
 
   async function salvar() {
     setSalvando(true)
     try {
-      // 1. Cria usuário no Supabase Auth
-      const { data: authData, error: authErr } = await supabase.auth.admin
-        ? { data: null, error: { message: 'Admin não disponível no cliente' } }
-        : { data: null, error: null }
-
-      // Usa signUp normal (gestor precisará de service role para criar sem confirmar email)
-      // Por simplicidade, cria o registro de colaborador e depois o gestor configura as credenciais
       const { data: colabData, error } = await supabase
         .from('colaboradores')
         .insert({
@@ -66,8 +61,8 @@ export default function NovoColaboradorPage() {
           turno: form.turno,
           setor: form.setor,
           perfil: form.perfil,
-          folga1_inicial: form.folga1,
-          folga2_inicial: form.folga2,
+          folga1_inicial: isAdm ? null : form.folga1,
+          folga2_inicial: isAdm ? null : form.folga2,
           ativo: true,
           data_admissao: format(new Date(), 'yyyy-MM-dd'),
         })
@@ -76,15 +71,19 @@ export default function NovoColaboradorPage() {
 
       if (error) throw error
 
-      // Tenta criar conta de acesso
-      const { error: signUpErr } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.senha,
-        options: { data: { colaborador_id: colabData.id } }
+      // Cria conta de acesso via rota server-side (não afeta sessão do gestor)
+      const res = await fetch('/api/criar-usuario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, password: form.senha, colaborador_id: colabData.id }),
       })
 
-      if (signUpErr && !signUpErr.message.includes('already registered')) {
-        console.warn('Auth signup warning:', signUpErr.message)
+      if (!res.ok) {
+        const body = await res.json()
+        // Usuário já existente no Auth não é erro crítico
+        if (!body.error?.includes('already been registered') && !body.error?.includes('already registered')) {
+          console.warn('Aviso ao criar acesso:', body.error)
+        }
       }
 
       toast.success(`${form.nome} cadastrado com sucesso!`)
@@ -95,8 +94,7 @@ export default function NovoColaboradorPage() {
     setSalvando(false)
   }
 
-  // Preview do ciclo de folgas
-  const previewFolgas = form.folga1 && form.folga2 ? calcularFolgas(form.folga1, form.folga2, 2) : []
+  const previewFolgas = !isAdm && form.folga1 && form.folga2 ? calcularFolgas(form.folga1, form.folga2, 2) : []
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
@@ -159,10 +157,13 @@ export default function NovoColaboradorPage() {
                   <button key={t} onClick={() => set('turno', t)}
                     className={`flex-1 py-2 rounded-lg border-2 font-semibold text-sm transition
                       ${form.turno === t ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                    Turno {t}
+                    {t === 'ADM' ? 'ADM' : `Turno ${t}`}
                   </button>
                 ))}
               </div>
+              {isAdm && (
+                <p className="text-xs text-blue-600 mt-2">Turno administrativo — sem ciclo 6x2.</p>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700">Setor</label>
@@ -178,31 +179,40 @@ export default function NovoColaboradorPage() {
         {passo === 3 && (
           <div>
             <h2 className="font-semibold text-gray-900 mb-1">Primeiras datas de folga</h2>
-            <p className="text-xs text-gray-500 mb-4">O sistema calculará o ciclo 6x2 automaticamente a partir dessas datas.</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">1º dia de folga</label>
-                <input type="date" value={form.folga1} onChange={e => set('folga1', e.target.value)}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+            {isAdm ? (
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg text-sm text-blue-700">
+                Colaboradores do turno <strong>ADM</strong> não possuem ciclo 6x2.<br />
+                Clique em <strong>Continuar</strong> para prosseguir.
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700">2º dia de folga</label>
-                <input type="date" value={form.folga2} onChange={e => set('folga2', e.target.value)}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-              </div>
-            </div>
-            {previewFolgas.length > 0 && (
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                <p className="text-xs font-medium text-gray-600 mb-2">Próximas folgas:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {previewFolgas.slice(0, 12).map(d => (
-                    <span key={d} className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
-                      {format(new Date(d + 'T00:00:00'), 'dd/MM', { locale: ptBR })}
-                    </span>
-                  ))}
-                  <span className="text-xs text-gray-400">...</span>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500 mb-4">O sistema calculará o ciclo 6x2 automaticamente a partir dessas datas.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">1º dia de folga</label>
+                    <input type="date" value={form.folga1} onChange={e => set('folga1', e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">2º dia de folga</label>
+                    <input type="date" value={form.folga2} onChange={e => set('folga2', e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
+                  </div>
                 </div>
-              </div>
+                {previewFolgas.length > 0 && (
+                  <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs font-medium text-gray-600 mb-2">Próximas folgas:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {previewFolgas.slice(0, 12).map(d => (
+                        <span key={d} className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
+                          {format(new Date(d + 'T00:00:00'), 'dd/MM', { locale: ptBR })}
+                        </span>
+                      ))}
+                      <span className="text-xs text-gray-400">...</span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -220,7 +230,7 @@ export default function NovoColaboradorPage() {
               <label className="text-sm font-medium text-gray-700">Senha</label>
               <input type="password" value={form.senha} onChange={e => set('senha', e.target.value)}
                 className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder="Mínimo 8 caracteres" />
+                placeholder="Mínimo 6 caracteres" />
               {form.senha && (
                 <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all ${form.senha.length < 6 ? 'w-1/4 bg-red-400' : form.senha.length < 8 ? 'w-2/4 bg-yellow-400' : 'w-full bg-green-400'}`} />
@@ -247,12 +257,14 @@ export default function NovoColaboradorPage() {
               {[
                 { label: 'Nome', value: form.nome },
                 { label: 'Perfil', value: form.perfil },
-                { label: 'Turno', value: `Turno ${form.turno}` },
+                { label: 'Turno', value: form.turno === 'ADM' ? 'ADM (Administrativo)' : `Turno ${form.turno}` },
                 { label: 'Setor', value: form.setor },
                 { label: 'Contato', value: form.contato },
                 { label: 'E-mail', value: form.email },
-                { label: '1ª folga', value: form.folga1 ? format(new Date(form.folga1 + 'T00:00:00'), 'dd/MM/yyyy') : '' },
-                { label: '2ª folga', value: form.folga2 ? format(new Date(form.folga2 + 'T00:00:00'), 'dd/MM/yyyy') : '' },
+                ...(!isAdm ? [
+                  { label: '1ª folga', value: form.folga1 ? format(new Date(form.folga1 + 'T00:00:00'), 'dd/MM/yyyy') : '' },
+                  { label: '2ª folga', value: form.folga2 ? format(new Date(form.folga2 + 'T00:00:00'), 'dd/MM/yyyy') : '' },
+                ] : []),
               ].map(r => (
                 <div key={r.label} className="flex justify-between py-2 border-b border-gray-100 text-sm">
                   <span className="text-gray-500">{r.label}</span>
