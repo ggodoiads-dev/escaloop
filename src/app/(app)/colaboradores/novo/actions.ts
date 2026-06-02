@@ -19,26 +19,38 @@ interface ColaboradorInput {
 
 export async function criarColaborador(input: ColaboradorInput) {
   try {
+    // Debug: inspeciona os env vars no servidor
+    const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+    const debug = {
+      svcKeyLen: svcKey.length,
+      svcFirstCode: svcKey.charCodeAt(0),
+      svcFirst4: svcKey.substring(0, 4),
+      urlLen: url.length,
+      urlFirstCode: url.charCodeAt(0),
+    }
+
+    // Se a chave estiver vazia ou com BOM, retorna erro detalhado
+    if (!svcKey || svcKey.length < 100) {
+      return { error: 'SERVICE_ROLE_KEY invalida: ' + JSON.stringify(debug) }
+    }
+    if (svcKey.charCodeAt(0) === 0xFEFF) {
+      return { error: 'SERVICE_ROLE_KEY tem BOM: len=' + svcKey.length + ' firstCode=' + svcKey.charCodeAt(0) }
+    }
+
     // STEP 1: Verifica sessao
     const supabase = await createClient()
     const { data: { user }, error: userErr } = await supabase.auth.getUser()
     if (userErr) return { error: 'Erro sessao: ' + userErr.message }
-    if (!user) return { error: 'Nao autorizado - sem usuario' }
+    if (!user) return { error: 'Nao autorizado' }
 
     // STEP 2: Verifica gestor
     const { data: gestor, error: gestorErr } = await supabase
-      .from('colaboradores')
-      .select('perfil')
-      .eq('user_id', user.id)
-      .single()
+      .from('colaboradores').select('perfil').eq('user_id', user.id).single()
     if (gestorErr) return { error: 'Erro gestor: ' + gestorErr.message }
     if (!gestor || gestor.perfil !== 'gestor') return { error: 'Sem permissao de gestor' }
 
-    // STEP 3: Cria admin client
-    const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-    const svcKeyClean = svcKey.replace(/^﻿/, '').trim()
-    console.log('[criarColaborador] svcKey length:', svcKey.length, 'firstChar:', svcKey.charCodeAt(0), 'cleanLength:', svcKeyClean.length)
-
+    // STEP 3: Admin client com chave limpa
     const admin = createAdminClient()
 
     // STEP 4: Insere colaborador
@@ -56,8 +68,7 @@ export async function criarColaborador(input: ColaboradorInput) {
         ativo: true,
         data_admissao: format(new Date(), 'yyyy-MM-dd'),
       })
-      .select()
-      .single()
+      .select().single()
 
     if (insertError) return { error: 'Erro insert: ' + insertError.message }
 
@@ -68,14 +79,12 @@ export async function criarColaborador(input: ColaboradorInput) {
       email_confirm: true,
       user_metadata: { colaborador_id: colabData.id },
     })
-
     if (authError && !authError.message.includes('already been registered')) {
-      console.warn('[criarColaborador] Auth warning:', authError.message)
+      console.warn('Auth warning:', authError.message)
     }
 
     return { success: true, id: colabData.id }
   } catch (e: any) {
-    console.error('[criarColaborador] CAUGHT:', e?.message, e?.stack?.substring(0, 300))
-    return { error: e?.message ?? 'Erro desconhecido' }
+    return { error: 'CATCH: ' + (e?.message ?? 'desconhecido') }
   }
 }
