@@ -18,55 +18,64 @@ interface ColaboradorInput {
 }
 
 export async function criarColaborador(input: ColaboradorInput) {
-  // Verifica se quem chama é um gestor autenticado
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  try {
+    // STEP 1: Verifica sessao
+    const supabase = await createClient()
+    const { data: { user }, error: userErr } = await supabase.auth.getUser()
+    if (userErr) return { error: 'Erro sessao: ' + userErr.message }
+    if (!user) return { error: 'Nao autorizado - sem usuario' }
 
-  if (!user) return { error: 'Não autorizado' }
+    // STEP 2: Verifica gestor
+    const { data: gestor, error: gestorErr } = await supabase
+      .from('colaboradores')
+      .select('perfil')
+      .eq('user_id', user.id)
+      .single()
+    if (gestorErr) return { error: 'Erro gestor: ' + gestorErr.message }
+    if (!gestor || gestor.perfil !== 'gestor') return { error: 'Sem permissao de gestor' }
 
-  const { data: gestor } = await supabase
-    .from('colaboradores')
-    .select('perfil')
-    .eq('user_id', user.id)
-    .single()
+    // STEP 3: Cria admin client
+    const svcKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+    const svcKeyClean = svcKey.replace(/^﻿/, '').trim()
+    console.log('[criarColaborador] svcKey length:', svcKey.length, 'firstChar:', svcKey.charCodeAt(0), 'cleanLength:', svcKeyClean.length)
 
-  if (!gestor || gestor.perfil !== 'gestor') {
-    return { error: 'Sem permissão' }
-  }
+    const admin = createAdminClient()
 
-  const admin = createAdminClient()
+    // STEP 4: Insere colaborador
+    const { data: colabData, error: insertError } = await admin
+      .from('colaboradores')
+      .insert({
+        nome: input.nome,
+        email: input.email,
+        contato: input.contato,
+        turno: input.turno,
+        setor: input.setor,
+        perfil: input.perfil,
+        folga1_inicial: input.isAdm ? null : input.folga1,
+        folga2_inicial: input.isAdm ? null : input.folga2,
+        ativo: true,
+        data_admissao: format(new Date(), 'yyyy-MM-dd'),
+      })
+      .select()
+      .single()
 
-  // Insere colaborador usando service role (bypass RLS)
-  const { data: colabData, error: insertError } = await admin
-    .from('colaboradores')
-    .insert({
-      nome: input.nome,
+    if (insertError) return { error: 'Erro insert: ' + insertError.message }
+
+    // STEP 5: Cria conta Auth
+    const { error: authError } = await admin.auth.admin.createUser({
       email: input.email,
-      contato: input.contato,
-      turno: input.turno,
-      setor: input.setor,
-      perfil: input.perfil,
-      folga1_inicial: input.isAdm ? null : input.folga1,
-      folga2_inicial: input.isAdm ? null : input.folga2,
-      ativo: true,
-      data_admissao: format(new Date(), 'yyyy-MM-dd'),
+      password: input.senha,
+      email_confirm: true,
+      user_metadata: { colaborador_id: colabData.id },
     })
-    .select()
-    .single()
 
-  if (insertError) return { error: insertError.message }
+    if (authError && !authError.message.includes('already been registered')) {
+      console.warn('[criarColaborador] Auth warning:', authError.message)
+    }
 
-  // Cria conta de acesso no Auth
-  const { error: authError } = await admin.auth.admin.createUser({
-    email: input.email,
-    password: input.senha,
-    email_confirm: true,
-    user_metadata: { colaborador_id: colabData.id },
-  })
-
-  if (authError && !authError.message.includes('already been registered')) {
-    console.warn('Auth warning:', authError.message)
+    return { success: true, id: colabData.id }
+  } catch (e: any) {
+    console.error('[criarColaborador] CAUGHT:', e?.message, e?.stack?.substring(0, 300))
+    return { error: e?.message ?? 'Erro desconhecido' }
   }
-
-  return { success: true, id: colabData.id }
 }
