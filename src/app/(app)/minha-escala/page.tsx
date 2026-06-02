@@ -19,6 +19,12 @@ export default async function MinhaEscalaPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+    return (
+  <div style={{ padding: 40 }}>
+    <h1>MINHA ESCALA FUNCIONOU</h1>
+    <pre>{JSON.stringify(eu, null, 2)}</pre>
+  </div>
+)
 
   const { data: eu } = await supabase
     .from('colaboradores')

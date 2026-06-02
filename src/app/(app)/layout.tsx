@@ -9,13 +9,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!user) redirect('/login')
 
-  const { data: colab } = await supabase
-    .from('colaboradores')
-    .select('nome, perfil')
-    .eq('user_id', user.id)
-    .single()
+const { data: colab, error } = await supabase
+  .from('colaboradores')
+  .select('nome, perfil')
+  .eq('user_id', user.id)
+  .single()
 
-  const perfil = (colab?.perfil ?? 'colaborador') as Perfil
+console.log('USER:', user.id)
+console.log('COLAB:', colab)
+console.log('ERROR:', error)
+
+const perfil = (colab?.perfil ?? 'colaborador') as Perfil
   const nome = colab?.nome ?? user.email ?? 'Usuário'
 
   return (
