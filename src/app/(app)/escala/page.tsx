@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getDiasDoMes, calcularFolgas } from '@/lib/escala'
 import { format, addMonths, subMonths } from 'date-fns'
@@ -7,7 +7,6 @@ import { ptBR } from 'date-fns/locale'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Colaborador, Lancamento } from '@/lib/types'
 
-// Confirmado via lançamento manual
 const STATUS_LANC: Record<string, { label: string; bg: string; text: string }> = {
   presente:            { label: '✓', bg: 'bg-green-500', text: 'text-white' },
   folga:               { label: 'F', bg: 'bg-blue-100', text: 'text-blue-600' },
@@ -18,16 +17,15 @@ const STATUS_LANC: Record<string, { label: string; bg: string; text: string }> =
   troca_turno:         { label: 'TR', bg: 'bg-purple-100', text: 'text-purple-600' },
 }
 
-// Calculado automaticamente (sem lançamento)
 const STATUS_CALC: Record<string, { label: string; bg: string; text: string }> = {
-  trabalho:       { label: '·', bg: 'bg-gray-50', text: 'text-gray-400' },
-  folga_calc:     { label: 'F', bg: 'bg-gray-100', text: 'text-gray-400' },
+  trabalho:   { label: '·', bg: 'bg-gray-50', text: 'text-gray-400' },
+  folga_calc: { label: 'F', bg: 'bg-gray-100', text: 'text-gray-400' },
 }
 
 export default function EscalaPage() {
   const supabase = createClient()
   const [mes, setMes] = useState(new Date())
-  const [turnoFiltro, setTurnoFiltro] = useState<string>('A')
+  const [turnoFiltro, setTurnoFiltro] = useState('A')
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [meuPerfil, setMeuPerfil] = useState('')
@@ -39,74 +37,62 @@ export default function EscalaPage() {
   const dias = getDiasDoMes(ano, mesNum)
   const hoje = format(new Date(), 'yyyy-MM-dd')
 
+  // Carrega dados do user logado
   useEffect(() => {
-    async function load() {
+    async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-
-      const { data: eu } = await supabase
-        .from('colaboradores')
-        .select('perfil, turno')
-        .eq('user_id', user.id)
-        .single()
-
-      const perfil = eu?.perfil ?? ''
-      const turno = eu?.turno ?? 'A'
-      setMeuPerfil(perfil)
-      setMeuTurno(turno)
-
-      // Define filtro inicial pelo turno do usuário (apenas na primeira carga)
+      const resp = await fetch(`/api/colabs`)
+      const todos: Colaborador[] = await resp.json()
+      const eu = todos.find(c => c.user_id === user.id)
+      if (!eu) return
+      setMeuPerfil(eu.perfil)
+      setMeuTurno(eu.turno)
       if (!iniciou) {
         setIniciou(true)
-        if (perfil !== 'lider') setTurnoFiltro(turno && turno !== 'ADM' ? turno : 'A')
+        if (eu.perfil !== 'lider' && eu.turno && eu.turno !== 'ADM') {
+          setTurnoFiltro(eu.turno)
+        }
       }
     }
-    load()
+    loadUser()
   }, [])
 
-  useEffect(() => {
-    async function loadColabs() {
-      const turno = meuPerfil === 'lider' ? meuTurno : turnoFiltro
+  // Carrega colaboradores e lançamentos do turno/mês selecionado
+  const loadEscala = useCallback(async () => {
+    const turno = meuPerfil === 'lider' ? meuTurno : turnoFiltro
+    if (!turno || turno === 'ADM') return
 
-      const { data: colabs } = await supabase
-        .from('colaboradores')
-        .select('*')
-        .eq('turno', turno)
-        .eq('ativo', true)
-        .order('setor').order('nome')
+    const colabsResp = await fetch(`/api/colabs?turno=${turno}&ativo=true`)
+    const colabs: Colaborador[] = await colabsResp.json()
+    setColaboradores(colabs)
 
-      setColaboradores(colabs ?? [])
+    if (colabs.length === 0) { setLancamentos([]); return }
 
-      const inicio = `${ano}-${String(mesNum).padStart(2, '0')}-01`
-      const fim = `${ano}-${String(mesNum).padStart(2, '0')}-31`
+    const inicio = `${ano}-${String(mesNum).padStart(2, '0')}-01`
+    const fim = `${ano}-${String(mesNum).padStart(2, '0')}-31`
+    const ids = colabs.map(c => c.id).join(',')
 
-      const { data: lancs } = await supabase
-        .from('lancamentos')
-        .select('*')
-        .gte('data', inicio)
-        .lte('data', fim)
-        .in('colaborador_id', (colabs ?? []).map(c => c.id))
-
-      setLancamentos(lancs ?? [])
-    }
-    if (meuPerfil || turnoFiltro) loadColabs()
+    const lancsResp = await fetch(`/api/lancamentos?inicio=${inicio}&fim=${fim}&colaborador_ids=${ids}`)
+    const lancs: Lancamento[] = await lancsResp.json()
+    setLancamentos(Array.isArray(lancs) ? lancs : [])
   }, [mes, turnoFiltro, meuPerfil, meuTurno])
 
+  useEffect(() => {
+    if (meuPerfil || turnoFiltro) loadEscala()
+  }, [loadEscala])
+
   function getStatus(colab: Colaborador, dia: string) {
-    // Lançamento manual tem prioridade
     const lanc = lancamentos.find(l => l.colaborador_id === colab.id && l.data === dia)
     if (lanc) return STATUS_LANC[lanc.status] ?? { label: '?', bg: 'bg-gray-200', text: 'text-gray-600' }
 
-    // ADM não tem ciclo 6x2
     if (!colab.folga1_inicial || !colab.folga2_inicial) {
       if (dia > hoje) return { label: '', bg: '', text: '' }
       return STATUS_CALC['trabalho']
     }
 
-    // Folga calculada pelo ciclo 6x2
     const folgas = calcularFolgas(colab.folga1_inicial, colab.folga2_inicial)
     if (folgas.includes(dia)) return STATUS_CALC['folga_calc']
-
     if (dia > hoje) return { label: '', bg: '', text: '' }
     return STATUS_CALC['trabalho']
   }
@@ -138,20 +124,13 @@ export default function EscalaPage() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button onClick={() => setMes(subMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100">
-              <ChevronLeft size={18} />
-            </button>
-            <span className="text-sm font-medium w-32 text-center">
-              {format(mes, "MMMM 'de' yyyy", { locale: ptBR })}
-            </span>
-            <button onClick={() => setMes(addMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100">
-              <ChevronRight size={18} />
-            </button>
+            <button onClick={() => setMes(subMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100"><ChevronLeft size={18} /></button>
+            <span className="text-sm font-medium w-32 text-center">{format(mes, "MMMM 'de' yyyy", { locale: ptBR })}</span>
+            <button onClick={() => setMes(addMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100"><ChevronRight size={18} /></button>
           </div>
         </div>
       </div>
 
-      {/* Legenda */}
       <div className="flex flex-wrap gap-3 mb-4 text-xs">
         {[
           { label: '✓ Presente confirmado', bg: 'bg-green-500', text: 'text-white' },
@@ -166,7 +145,6 @@ export default function EscalaPage() {
         ))}
       </div>
 
-      {/* Tabela */}
       <div className="bg-white rounded-xl shadow-sm overflow-auto">
         <table className="w-full text-xs border-collapse">
           <thead>
@@ -183,26 +161,18 @@ export default function EscalaPage() {
             {Object.entries(porSetor).map(([setor, lista]) => (
               <>
                 <tr key={'setor-' + setor} className="bg-gray-50">
-                  <td colSpan={dias.length + 1} className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider sticky left-0 bg-gray-50">
-                    {setor}
-                  </td>
+                  <td colSpan={dias.length + 1} className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider sticky left-0 bg-gray-50">{setor}</td>
                 </tr>
                 {lista.map(colab => (
                   <tr key={colab.id} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="p-3 font-medium text-gray-900 sticky left-0 bg-white">
-                      <a href={`/colaboradores/${colab.id}`} className="hover:text-orange-500 transition">
-                        {colab.nome}
-                      </a>
+                      <a href={`/colaboradores/${colab.id}`} className="hover:text-orange-500 transition">{colab.nome}</a>
                     </td>
                     {dias.map(d => {
                       const s = getStatus(colab, d)
                       return (
                         <td key={d} className={`text-center p-0.5 ${d === hoje ? 'bg-orange-50' : ''}`}>
-                          {s.label && (
-                            <span className={`inline-block w-7 h-7 rounded text-center leading-7 font-bold ${s.bg} ${s.text}`}>
-                              {s.label}
-                            </span>
-                          )}
+                          {s.label && <span className={`inline-block w-7 h-7 rounded text-center leading-7 font-bold ${s.bg} ${s.text}`}>{s.label}</span>}
                         </td>
                       )
                     })}
@@ -212,9 +182,7 @@ export default function EscalaPage() {
             ))}
           </tbody>
         </table>
-        {colaboradores.length === 0 && (
-          <p className="text-center py-12 text-gray-400 text-sm">Nenhum colaborador encontrado</p>
-        )}
+        {colaboradores.length === 0 && <p className="text-center py-12 text-gray-400 text-sm">Nenhum colaborador encontrado</p>}
       </div>
     </div>
   )

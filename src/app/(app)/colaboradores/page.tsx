@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
 
-// Sempre busca dados frescos do banco, sem cache
 export const dynamic = 'force-dynamic'
 
 export default async function ColaboradoresPage() {
@@ -11,7 +11,9 @@ export default async function ColaboradoresPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: eu } = await supabase
+  // Usa admin client para verificar perfil (bypass RLS recursiva)
+  const admin = createAdminClient()
+  const { data: eu } = await admin
     .from('colaboradores')
     .select('perfil')
     .eq('user_id', user.id)
@@ -19,7 +21,8 @@ export default async function ColaboradoresPage() {
 
   if (eu?.perfil !== 'gestor' && eu?.perfil !== 'rh') redirect('/dashboard')
 
-  const { data: colaboradores } = await supabase
+  // Admin client busca TODOS os colaboradores (bypass RLS)
+  const { data: colaboradores } = await admin
     .from('colaboradores')
     .select('*')
     .order('turno').order('setor').order('nome')
