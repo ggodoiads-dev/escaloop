@@ -6,6 +6,7 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toast } from 'sonner'
 import { ChevronRight, ChevronLeft, Check } from 'lucide-react'
+import { criarColaborador } from './actions'
 
 const SETORES = ['Líderes', 'Empilhadeiristas', 'Conferentes', 'Amarradores', 'Reforma de paletes', 'Seleção chapatex', '5S', 'Administrativo']
 const TURNOS = ['A', 'B', 'C', 'ADM']
@@ -50,28 +51,20 @@ export default function NovoColaboradorPage() {
   async function salvar() {
     setSalvando(true)
     try {
-      const colaborador = {
+      const result = await criarColaborador({
+        perfil: form.perfil,
         nome: form.nome,
-        email: form.email,
         contato: form.contato,
         turno: form.turno,
         setor: form.setor,
-        perfil: form.perfil,
-        folga1_inicial: isAdm ? null : form.folga1,
-        folga2_inicial: isAdm ? null : form.folga2,
-        ativo: true,
-        data_admissao: format(new Date(), 'yyyy-MM-dd'),
-      }
-
-      // Tudo via API server-side com service role (bypass RLS, não afeta sessão)
-      const res = await fetch('/api/criar-usuario', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ colaborador, password: form.senha }),
+        folga1: form.folga1,
+        folga2: form.folga2,
+        email: form.email,
+        senha: form.senha,
+        isAdm,
       })
 
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.error || 'Erro ao cadastrar')
+      if (result.error) throw new Error(result.error)
 
       toast.success(`${form.nome} cadastrado com sucesso!`)
       router.push('/colaboradores')
