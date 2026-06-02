@@ -1,7 +1,6 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { calcularFolgas } from '@/lib/escala'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -27,7 +26,6 @@ interface Form {
 
 export default function NovoColaboradorPage() {
   const router = useRouter()
-  const supabase = createClient()
   const [passo, setPasso] = useState(1)
   const [form, setForm] = useState<Form>({
     perfil: '', nome: '', contato: '', turno: '', setor: '',
@@ -52,39 +50,28 @@ export default function NovoColaboradorPage() {
   async function salvar() {
     setSalvando(true)
     try {
-      const { data: colabData, error } = await supabase
-        .from('colaboradores')
-        .insert({
-          nome: form.nome,
-          email: form.email,
-          contato: form.contato,
-          turno: form.turno,
-          setor: form.setor,
-          perfil: form.perfil,
-          folga1_inicial: isAdm ? null : form.folga1,
-          folga2_inicial: isAdm ? null : form.folga2,
-          ativo: true,
-          data_admissao: format(new Date(), 'yyyy-MM-dd'),
-        })
-        .select()
-        .single()
+      const colaborador = {
+        nome: form.nome,
+        email: form.email,
+        contato: form.contato,
+        turno: form.turno,
+        setor: form.setor,
+        perfil: form.perfil,
+        folga1_inicial: isAdm ? null : form.folga1,
+        folga2_inicial: isAdm ? null : form.folga2,
+        ativo: true,
+        data_admissao: format(new Date(), 'yyyy-MM-dd'),
+      }
 
-      if (error) throw error
-
-      // Cria conta de acesso via rota server-side (não afeta sessão do gestor)
+      // Tudo via API server-side com service role (bypass RLS, não afeta sessão)
       const res = await fetch('/api/criar-usuario', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email, password: form.senha, colaborador_id: colabData.id }),
+        body: JSON.stringify({ colaborador, password: form.senha }),
       })
 
-      if (!res.ok) {
-        const body = await res.json()
-        // Usuário já existente no Auth não é erro crítico
-        if (!body.error?.includes('already been registered') && !body.error?.includes('already registered')) {
-          console.warn('Aviso ao criar acesso:', body.error)
-        }
-      }
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Erro ao cadastrar')
 
       toast.success(`${form.nome} cadastrado com sucesso!`)
       router.push('/colaboradores')
