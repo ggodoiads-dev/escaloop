@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+
 // GET /api/lancamentos?inicio=2026-06-01&fim=2026-06-30&colaborador_ids=id1,id2
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-  return NextResponse.json(data)
+  return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 // POST /api/lancamentos — upsert

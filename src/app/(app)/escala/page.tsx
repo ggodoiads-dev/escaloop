@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getDiasDoMes, calcularFolgas } from '@/lib/escala'
 import { format, addMonths, subMonths } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { Colaborador, Lancamento } from '@/lib/types'
 
 const STATUS_LANC: Record<string, { label: string; bg: string; text: string }> = {
@@ -124,6 +124,10 @@ export default function EscalaPage() {
             </div>
           )}
           <div className="flex items-center gap-2">
+            <button onClick={() => loadEscala()} title="Atualizar escala"
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition">
+              <RefreshCw size={16} />
+            </button>
             <button onClick={() => setMes(subMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100"><ChevronLeft size={18} /></button>
             <span className="text-sm font-medium w-32 text-center">{format(mes, "MMMM 'de' yyyy", { locale: ptBR })}</span>
             <button onClick={() => setMes(addMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-gray-100"><ChevronRight size={18} /></button>
